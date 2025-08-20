@@ -48,26 +48,32 @@ class CacheManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticker TEXT NOT NULL,
                     interval TEXT NOT NULL,
-                    date TEXT NOT NULL,
+                    date DATE NOT NULL,
                     open_price REAL NOT NULL,
                     high_price REAL NOT NULL,
                     low_price REAL NOT NULL,
                     close_price REAL NOT NULL,
                     volume INTEGER,
-                    cached_at TEXT NOT NULL,
+                    cached_at DATETIME NOT NULL,
                     UNIQUE(ticker, interval, date)
                 )
             """)
             
-            # Create indexes for faster queries
+            # Create indexes for faster queries with proper date ordering
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_ticker_interval_date 
-                ON stock_data(ticker, interval, date)
+                ON stock_data(ticker, interval, date DESC)
             """)
             
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_ticker_interval 
                 ON stock_data(ticker, interval)
+            """)
+            
+            # Create index for date range queries
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_date_range 
+                ON stock_data(date)
             """)
             
             conn.commit()
@@ -86,17 +92,18 @@ class CacheManager:
         cached_at = datetime.now().isoformat()
         
         for date_idx, row in df.iterrows():
+            # Ensure proper ISO date format for SQLite DATE type
             date_str = date_idx.strftime('%Y-%m-%d')
             volume = int(row.get('Volume', 0)) if pd.notna(row.get('Volume', 0)) else None
             
             row_tuple = (
-                date_str,
+                date_str,              # DATE format: YYYY-MM-DD
                 float(row['Open']),
                 float(row['High']),
                 float(row['Low']),
                 float(row['Close']),
                 volume,
-                cached_at
+                cached_at             # DATETIME format: ISO8601
             )
             rows.append(row_tuple)
         
@@ -153,15 +160,16 @@ class CacheManager:
         """
         with sqlite3.connect(self.cache_db_path) as conn:
             cursor = conn.execute("""
-                SELECT MIN(date), MAX(date)
+                SELECT MIN(date) as min_date, MAX(date) as max_date
                 FROM stock_data 
                 WHERE ticker = ? AND interval = ?
             """, (ticker, interval))
             
             row = cursor.fetchone()
             if row and row[0] and row[1]:
-                start_date = datetime.fromisoformat(row[0]).date()
-                end_date = datetime.fromisoformat(row[1]).date()
+                # SQLite stores dates as text in ISO format, parse them properly
+                start_date = datetime.strptime(row[0], '%Y-%m-%d').date()
+                end_date = datetime.strptime(row[1], '%Y-%m-%d').date()
                 return start_date, end_date
         
         return None
@@ -228,13 +236,13 @@ class CacheManager:
                            ticker, interval, requested_start, requested_end)
             return None
         
-        # Query the specific date range from database
+        # Query the specific date range from database using proper date comparison
         with sqlite3.connect(self.cache_db_path) as conn:
             cursor = conn.execute("""
                 SELECT date, open_price, high_price, low_price, close_price, volume, cached_at
                 FROM stock_data 
                 WHERE ticker = ? AND interval = ?
-                AND date >= ? AND date <= ?
+                AND date >= DATE(?) AND date <= DATE(?)
                 ORDER BY date ASC
             """, (ticker, interval, requested_start.isoformat(), requested_end.isoformat()))
             
@@ -395,11 +403,16 @@ class CacheManager:
             cutoff_date = (datetime.now() - timedelta(days=days_old)).isoformat()
             
             with sqlite3.connect(self.cache_db_path) as conn:
-                cursor = conn.execute("SELECT COUNT(*) FROM stock_data WHERE cached_at < ?", 
-                                    (cutoff_date,))
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM stock_data 
+                    WHERE DATETIME(cached_at) < DATETIME(?)
+                """, (cutoff_date,))
                 old_count = cursor.fetchone()[0]
                 
-                conn.execute("DELETE FROM stock_data WHERE cached_at < ?", (cutoff_date,))
+                conn.execute("""
+                    DELETE FROM stock_data 
+                    WHERE DATETIME(cached_at) < DATETIME(?)
+                """, (cutoff_date,))
                 conn.commit()
                 
                 self.logger.info("Cleaned up %d old cache entries (older than %d days)", 
