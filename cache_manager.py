@@ -44,67 +44,137 @@ class CacheManager:
         """Initialize the SQLite database with required tables."""
         with sqlite3.connect(self.cache_db_path) as conn:
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS stock_cache (
+                CREATE TABLE IF NOT EXISTS stock_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticker TEXT NOT NULL,
                     interval TEXT NOT NULL,
-                    start_date TEXT NOT NULL,
-                    end_date TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    open_price REAL NOT NULL,
+                    high_price REAL NOT NULL,
+                    low_price REAL NOT NULL,
+                    close_price REAL NOT NULL,
+                    volume INTEGER,
                     cached_at TEXT NOT NULL,
-                    data_json TEXT NOT NULL,
-                    UNIQUE(ticker, interval, start_date, end_date)
+                    UNIQUE(ticker, interval, date)
                 )
             """)
             
-            # Create index for faster queries
+            # Create indexes for faster queries
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ticker_interval_date 
+                ON stock_data(ticker, interval, date)
+            """)
+            
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_ticker_interval 
-                ON stock_cache(ticker, interval)
+                ON stock_data(ticker, interval)
             """)
             
             conn.commit()
     
-    def _serialize_dataframe(self, df: pd.DataFrame) -> str:
+    def _dataframe_to_rows(self, df: pd.DataFrame) -> list:
         """
-        Convert DataFrame to JSON string for storage.
+        Convert DataFrame to list of row tuples for database insertion.
         
         Args:
-            df (pd.DataFrame): DataFrame to serialize
+            df (pd.DataFrame): DataFrame to convert
             
         Returns:
-            str: JSON string representation
+            list: List of tuples for database insertion
         """
-        # Convert DataFrame to dict with date index as strings
-        data_dict = {
-            'index': [d.strftime('%Y-%m-%d') for d in df.index],
-            'data': df.to_dict('records')
-        }
-        return json.dumps(data_dict)
+        rows = []
+        cached_at = datetime.now().isoformat()
+        
+        for date_idx, row in df.iterrows():
+            date_str = date_idx.strftime('%Y-%m-%d')
+            volume = int(row.get('Volume', 0)) if pd.notna(row.get('Volume', 0)) else None
+            
+            row_tuple = (
+                date_str,
+                float(row['Open']),
+                float(row['High']),
+                float(row['Low']),
+                float(row['Close']),
+                volume,
+                cached_at
+            )
+            rows.append(row_tuple)
+        
+        return rows
     
-    def _deserialize_dataframe(self, data_json: str) -> pd.DataFrame:
+    def _rows_to_dataframe(self, rows: list) -> pd.DataFrame:
         """
-        Convert JSON string back to DataFrame.
+        Convert database rows back to DataFrame.
         
         Args:
-            data_json (str): JSON string representation
+            rows (list): List of database row tuples
             
         Returns:
             pd.DataFrame: Reconstructed DataFrame
         """
-        data_dict = json.loads(data_json)
-        df = pd.DataFrame(data_dict['data'])
-        df.index = pd.to_datetime(data_dict['index'])
+        if not rows:
+            return pd.DataFrame()
+        
+        data = []
+        for row in rows:
+            date_str, open_price, high_price, low_price, close_price, volume, cached_at = row
+            
+            row_dict = {
+                'Open': open_price,
+                'High': high_price,
+                'Low': low_price,
+                'Close': close_price
+            }
+            
+            if volume is not None:
+                row_dict['Volume'] = volume
+            
+            data.append(row_dict)
+        
+        df = pd.DataFrame(data)
+        df.index = pd.to_datetime([row[0] for row in rows])
+        
         return df
     
-    def _find_covering_cache(
+    def _get_cached_date_range(
         self, 
         ticker: str, 
-        interval: str, 
-        requested_start: date, 
-        requested_end: date
-    ) -> Optional[Tuple[pd.DataFrame, date, date]]:
+        interval: str
+    ) -> Optional[Tuple[date, date]]:
         """
-        Find cached data that covers the requested date range.
+        Get the date range of cached data for a ticker/interval.
+        
+        Args:
+            ticker (str): Stock ticker
+            interval (str): Data interval
+            
+        Returns:
+            Optional[Tuple[date, date]]: Start and end dates of cached data, or None
+        """
+        with sqlite3.connect(self.cache_db_path) as conn:
+            cursor = conn.execute("""
+                SELECT MIN(date), MAX(date)
+                FROM stock_data 
+                WHERE ticker = ? AND interval = ?
+            """, (ticker, interval))
+            
+            row = cursor.fetchone()
+            if row and row[0] and row[1]:
+                start_date = datetime.fromisoformat(row[0]).date()
+                end_date = datetime.fromisoformat(row[1]).date()
+                return start_date, end_date
+        
+        return None
+    
+    def _check_data_coverage(
+        self,
+        ticker: str,
+        interval: str,
+        requested_start: date,
+        requested_end: date
+    ) -> bool:
+        """
+        Check if we have cached data covering the requested date range.
         
         Args:
             ticker (str): Stock ticker
@@ -113,35 +183,25 @@ class CacheManager:
             requested_end (date): End date requested
             
         Returns:
-            Optional[Tuple[pd.DataFrame, date, date]]: Cached data and its date range, or None
+            bool: True if cached data covers the requested range
         """
-        with sqlite3.connect(self.cache_db_path) as conn:
-            cursor = conn.execute("""
-                SELECT data_json, start_date, end_date, cached_at
-                FROM stock_cache 
-                WHERE ticker = ? AND interval = ?
-                AND start_date <= ? AND end_date >= ?
-                ORDER BY cached_at DESC
-                LIMIT 1
-            """, (ticker, interval, requested_start.isoformat(), requested_end.isoformat()))
-            
-            row = cursor.fetchone()
-            if row:
-                data_json, start_date_str, end_date_str, cached_at = row
-                try:
-                    df = self._deserialize_dataframe(data_json)
-                    start_date = datetime.fromisoformat(start_date_str).date()
-                    end_date = datetime.fromisoformat(end_date_str).date()
-                    
-                    self.logger.info("Found covering cache for %s %s: %s to %s", 
-                                   ticker, interval, start_date, end_date)
-                    return df, start_date, end_date
-                    
-                except Exception as e:
-                    self.logger.error("Failed to deserialize cached data: %s", str(e))
-                    return None
+        cached_range = self._get_cached_date_range(ticker, interval)
+        if not cached_range:
+            return False
         
-        return None
+        cached_start, cached_end = cached_range
+        
+        # Check if cached range covers requested range
+        covers_range = (cached_start <= requested_start and cached_end >= requested_end)
+        
+        if covers_range:
+            self.logger.info("Cache covers requested range for %s %s: cached %s to %s, requested %s to %s", 
+                           ticker, interval, cached_start, cached_end, requested_start, requested_end)
+        else:
+            self.logger.info("Cache does not cover requested range for %s %s: cached %s to %s, requested %s to %s", 
+                           ticker, interval, cached_start, cached_end, requested_start, requested_end)
+        
+        return covers_range
     
     def get_cached_data(
         self, 
@@ -162,25 +222,35 @@ class CacheManager:
         Returns:
             Optional[pd.DataFrame]: Cached data covering the requested range, or None
         """
-        cache_result = self._find_covering_cache(ticker, interval, requested_start, requested_end)
-        
-        if cache_result is None:
+        # Check if we have data covering the requested range
+        if not self._check_data_coverage(ticker, interval, requested_start, requested_end):
             self.logger.info("No covering cache found for %s %s %s to %s", 
                            ticker, interval, requested_start, requested_end)
             return None
         
-        df, cached_start, cached_end = cache_result
+        # Query the specific date range from database
+        with sqlite3.connect(self.cache_db_path) as conn:
+            cursor = conn.execute("""
+                SELECT date, open_price, high_price, low_price, close_price, volume, cached_at
+                FROM stock_data 
+                WHERE ticker = ? AND interval = ?
+                AND date >= ? AND date <= ?
+                ORDER BY date ASC
+            """, (ticker, interval, requested_start.isoformat(), requested_end.isoformat()))
+            
+            rows = cursor.fetchall()
         
-        # Filter the cached data to the exact requested range
-        filtered_df = df[
-            (df.index.date >= requested_start) & 
-            (df.index.date <= requested_end)
-        ].copy()
+        if not rows:
+            self.logger.info("No cached data found for exact date range")
+            return None
         
-        if len(filtered_df) > 0:
+        # Convert rows to DataFrame
+        df = self._rows_to_dataframe(rows)
+        
+        if len(df) > 0:
             self.logger.info("Returning %d rows of cached data for %s %s", 
-                           len(filtered_df), ticker, interval)
-            return filtered_df
+                           len(df), ticker, interval)
+            return df
         else:
             self.logger.info("Cached data exists but no rows match requested date range")
             return None
@@ -205,18 +275,19 @@ class CacheManager:
         
         start_date = df.index.min().date()
         end_date = df.index.max().date()
-        cached_at = datetime.now().isoformat()
-        data_json = self._serialize_dataframe(df)
         
         try:
+            # Convert DataFrame to rows for insertion
+            rows = self._dataframe_to_rows(df)
+            
             with sqlite3.connect(self.cache_db_path) as conn:
                 # Use INSERT OR REPLACE to handle duplicates
-                conn.execute("""
-                    INSERT OR REPLACE INTO stock_cache 
-                    (ticker, interval, start_date, end_date, cached_at, data_json)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (ticker, interval, start_date.isoformat(), end_date.isoformat(), 
-                      cached_at, data_json))
+                for row in rows:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO stock_data 
+                        (ticker, interval, date, open_price, high_price, low_price, close_price, volume, cached_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (ticker, interval) + row)
                 
                 conn.commit()
                 
@@ -237,17 +308,17 @@ class CacheManager:
         try:
             with sqlite3.connect(self.cache_db_path) as conn:
                 if ticker and interval:
-                    conn.execute("DELETE FROM stock_cache WHERE ticker = ? AND interval = ?", 
+                    conn.execute("DELETE FROM stock_data WHERE ticker = ? AND interval = ?", 
                                (ticker, interval))
                     self.logger.info("Cleared cache for %s %s", ticker, interval)
                 elif ticker:
-                    conn.execute("DELETE FROM stock_cache WHERE ticker = ?", (ticker,))
+                    conn.execute("DELETE FROM stock_data WHERE ticker = ?", (ticker,))
                     self.logger.info("Cleared all cache for ticker %s", ticker)
                 elif interval:
-                    conn.execute("DELETE FROM stock_cache WHERE interval = ?", (interval,))
+                    conn.execute("DELETE FROM stock_data WHERE interval = ?", (interval,))
                     self.logger.info("Cleared all cache for interval %s", interval)
                 else:
-                    conn.execute("DELETE FROM stock_cache")
+                    conn.execute("DELETE FROM stock_data")
                     self.logger.info("Cleared all cache data")
                 
                 conn.commit()
@@ -265,31 +336,32 @@ class CacheManager:
         try:
             with sqlite3.connect(self.cache_db_path) as conn:
                 # Get total count
-                total_count = conn.execute("SELECT COUNT(*) FROM stock_cache").fetchone()[0]
+                total_count = conn.execute("SELECT COUNT(*) FROM stock_data").fetchone()[0]
                 
-                # Get cache entries with details
+                # Get cache summary by ticker and interval
                 cursor = conn.execute("""
-                    SELECT ticker, interval, start_date, end_date, cached_at,
-                           LENGTH(data_json) as size_bytes
-                    FROM stock_cache 
-                    ORDER BY cached_at DESC
+                    SELECT ticker, interval, 
+                           MIN(date) as start_date, 
+                           MAX(date) as end_date,
+                           COUNT(*) as row_count,
+                           MAX(cached_at) as last_cached
+                    FROM stock_data 
+                    GROUP BY ticker, interval
+                    ORDER BY last_cached DESC
                 """)
                 
                 entries = []
-                total_size = 0
                 
                 for row in cursor.fetchall():
-                    ticker, interval, start_date, end_date, cached_at, size_bytes = row
-                    total_size += size_bytes
+                    ticker, interval, start_date, end_date, row_count, last_cached = row
                     
                     entries.append({
                         'ticker': ticker,
                         'interval': interval,
                         'start_date': start_date,
                         'end_date': end_date,
-                        'cached_at': cached_at,
-                        'size_bytes': size_bytes,
-                        'size_mb': round(size_bytes / (1024 * 1024), 3)
+                        'row_count': row_count,
+                        'last_cached': last_cached
                     })
                 
                 # Get database file size
@@ -299,7 +371,7 @@ class CacheManager:
                     'database_path': str(self.cache_db_path),
                     'database_size_mb': round(db_size / (1024 * 1024), 3),
                     'total_entries': total_count,
-                    'total_data_size_mb': round(total_size / (1024 * 1024), 3),
+                    'unique_datasets': len(entries),
                     'entries': entries
                 }
                 
@@ -323,11 +395,11 @@ class CacheManager:
             cutoff_date = (datetime.now() - timedelta(days=days_old)).isoformat()
             
             with sqlite3.connect(self.cache_db_path) as conn:
-                cursor = conn.execute("SELECT COUNT(*) FROM stock_cache WHERE cached_at < ?", 
+                cursor = conn.execute("SELECT COUNT(*) FROM stock_data WHERE cached_at < ?", 
                                     (cutoff_date,))
                 old_count = cursor.fetchone()[0]
                 
-                conn.execute("DELETE FROM stock_cache WHERE cached_at < ?", (cutoff_date,))
+                conn.execute("DELETE FROM stock_data WHERE cached_at < ?", (cutoff_date,))
                 conn.commit()
                 
                 self.logger.info("Cleaned up %d old cache entries (older than %d days)", 
