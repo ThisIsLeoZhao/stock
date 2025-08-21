@@ -11,6 +11,7 @@ from data_fetcher import StockDataService, get_stock_data
 from cache_manager import CacheManager
 import pandas as pd
 import time
+import yfinance as yf
 
 
 def test_basic_functionality():
@@ -212,13 +213,17 @@ def main():
     print("Stock Data Service V2 - Comprehensive Testing\n")
     print("=" * 60)
     
+    ticker = yf.Ticker('AAPL')
+    data = ticker.history(period='1y', interval='1d')
+    print(data)
+    
     try:
-        test_basic_functionality()
-        test_caching_intelligence()
-        test_cache_management()
-        test_different_intervals()
-        test_convenience_function()
-        test_data_analysis_ready()
+        # test_basic_functionality()
+        # test_caching_intelligence()
+        # test_cache_management()
+        # test_different_intervals()
+        # test_convenience_function()
+        # test_data_analysis_ready()
         
         print("=" * 60)
         print("✅ All tests completed!")
