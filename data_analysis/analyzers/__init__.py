@@ -9,6 +9,7 @@ from .daily_returns_analyzer import DailyReturnsAnalyzer
 from .intraday_returns_analyzer import IntradayReturnsAnalyzer
 from .weekly_returns_analyzer import WeeklyReturnsAnalyzer
 from .comparison_analyzer import ComparisonAnalyzer
+from .daily_range_analyzer import DailyRangeAnalyzer
 from .base_analyzer import BaseAnalyzer
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     'IntradayReturnsAnalyzer',
     'WeeklyReturnsAnalyzer',
     'ComparisonAnalyzer',
+    'DailyRangeAnalyzer',
     'BaseAnalyzer'
 ]

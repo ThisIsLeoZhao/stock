@@ -9,6 +9,7 @@ from .daily_returns_analyzer import DailyReturnsAnalyzer
 from .intraday_returns_analyzer import IntradayReturnsAnalyzer
 from .weekly_returns_analyzer import WeeklyReturnsAnalyzer
 from .comparison_analyzer import ComparisonAnalyzer
+from .daily_range_analyzer import DailyRangeAnalyzer
 from ..modules.data_provider import DataProvider
 
 
@@ -30,6 +31,7 @@ class ReturnsAnalyzer:
         self._intraday_analyzer = None
         self._weekly_analyzer = None
         self._comparison_analyzer = None
+        self._daily_range_analyzer = None
     
     @property
     def daily_analyzer(self) -> DailyReturnsAnalyzer:
@@ -58,6 +60,13 @@ class ReturnsAnalyzer:
         if self._comparison_analyzer is None:
             self._comparison_analyzer = ComparisonAnalyzer(self.db_path)
         return self._comparison_analyzer
+    
+    @property
+    def daily_range_analyzer(self) -> DailyRangeAnalyzer:
+        """懒加载日内波动范围分析器"""
+        if self._daily_range_analyzer is None:
+            self._daily_range_analyzer = DailyRangeAnalyzer(self.db_path)
+        return self._daily_range_analyzer
     
     # 保持向后兼容的方法
     def analyze_daily_returns(self, ticker: str, create_plots: bool = True) -> Dict:
@@ -112,6 +121,19 @@ class ReturnsAnalyzer:
         """
         return self.comparison_analyzer.analyze(tickers, create_plots)
     
+    def analyze_daily_range(self, ticker: str, create_plots: bool = True) -> Dict:
+        """
+        分析股票的日内波动范围（双起点：昨收&今开）
+        
+        Args:
+            ticker: 股票代码
+            create_plots: 是否创建可视化图表
+            
+        Returns:
+            分析结果字典
+        """
+        return self.daily_range_analyzer.analyze(ticker, create_plots)
+    
     def get_available_data(self) -> List[Dict]:
         """获取数据库中可用的数据列表"""
         return self.data_provider.get_available_data()
@@ -122,7 +144,8 @@ class ReturnsAnalyzer:
             'daily': '每日收益率分析',
             'intraday': '日内收益率分析（开盘到收盘）',
             'weekly': '周收益率分析',
-            'comparison': '多股票对比分析'
+            'comparison': '多股票对比分析',
+            'daily_range': '日内波动范围分析（双起点：昨收&今开）'
         }
     
     def run_analysis(self, analysis_type: str, ticker: Optional[str] = None, 
@@ -158,6 +181,11 @@ class ReturnsAnalyzer:
             if not tickers or len(tickers) < 2:
                 raise ValueError("对比分析需要提供至少2个ticker")
             return self.compare_returns(tickers, create_plots)
+        
+        elif analysis_type == 'daily_range':
+            if not ticker:
+                raise ValueError("日内波动范围分析需要提供ticker参数")
+            return self.analyze_daily_range(ticker, create_plots)
         
         else:
             available = list(self.get_available_analyzers().keys())

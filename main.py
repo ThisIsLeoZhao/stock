@@ -110,6 +110,33 @@ def analyze_intraday_returns(ticker: str):
         return False
 
 
+def analyze_daily_range(ticker: str):
+    """分析单个股票的日内波动范围（双起点：昨收&今开）"""
+    print(f"📊 开始分析 {ticker} 日内波动范围...")
+    print(f"   分析内容: 【昨收起点】昨收→高低点 & 【今开起点】今开→高低点")
+    
+    try:
+        analyzer = ReturnsAnalyzer()
+        
+        # 转换ticker格式
+        if ticker.upper() == 'SPX':
+            ticker = '^GSPC'
+        
+        # 分析日内波动范围
+        range_results = analyzer.analyze_daily_range(ticker, create_plots=True)
+        
+        if range_results:
+            print(f"✅ {ticker} 日内波动范围分析完成")
+            return True
+        else:
+            print(f"❌ {ticker} 波动范围分析失败（可能没有数据）")
+            return False
+            
+    except Exception as e:
+        print(f"❌ 波动范围分析过程中出错: {e}")
+        return False
+
+
 def compare_stocks(tickers: list):
     """比较多个股票的收益率"""
     print(f"📈 开始比较股票收益率: {', '.join(tickers)}")
@@ -159,6 +186,7 @@ def main():
   python3 main.py fetch AAPL --period 5y  # 获取AAPL 5年数据
   python3 main.py analyze SPX         # 分析SPX收益率
   python3 main.py intraday SPX        # 分析SPX日内涨跌幅（高开/低开/平开）
+  python3 main.py range SPX           # 分析SPX日内波动范围（双起点：昨收&今开）
   python3 main.py compare AAPL GOOGL MSFT  # 比较多个股票
   python3 main.py list               # 查看可用数据
         """
@@ -181,6 +209,10 @@ def main():
     # intraday命令
     intraday_parser = subparsers.add_parser('intraday', help='分析股票日内涨跌幅（开盘到收盘）')
     intraday_parser.add_argument('ticker', help='股票代码 (如: AAPL, SPX)')
+    
+    # range命令
+    range_parser = subparsers.add_parser('range', help='分析股票日内波动范围（双起点：昨收&今开）')
+    range_parser.add_argument('ticker', help='股票代码 (如: AAPL, SPX)')
     
     # compare命令
     compare_parser = subparsers.add_parser('compare', help='比较多个股票')
@@ -214,6 +246,12 @@ def main():
     
     elif args.command == 'intraday':
         success = analyze_intraday_returns(args.ticker)
+        if not success:
+            print(f"\n💡 提示: 可能需要先获取数据:")
+            print(f"   python3 main.py fetch {args.ticker}")
+    
+    elif args.command == 'range':
+        success = analyze_daily_range(args.ticker)
         if not success:
             print(f"\n💡 提示: 可能需要先获取数据:")
             print(f"   python3 main.py fetch {args.ticker}")

@@ -32,6 +32,7 @@ data_analysis/
 | **DailyReturnsAnalyzer** | 每日收益率分析 | `daily_returns_analyzer.py` |
 | **IntradayReturnsAnalyzer** | 日内收益率分析（含高开/低开分组） | `intraday_returns_analyzer.py` |
 | **WeeklyReturnsAnalyzer** | 周收益率分析 | `weekly_returns_analyzer.py` |
+| **DailyRangeAnalyzer** | 日内波动范围分析（双起点：昨收&今开） | `daily_range_analyzer.py` |
 | **ComparisonAnalyzer** | 多股票对比分析 | `comparison_analyzer.py` |
 
 ### 🔧 使用方式
@@ -47,6 +48,9 @@ analyzer.analyze_daily_returns('SPX')
 
 # 日内分析
 analyzer.analyze_intraday_returns('SPX')
+
+# 日内波动范围分析
+analyzer.analyze_daily_range('SPX')
 
 # 周分析  
 analyzer.analyze_weekly_returns('SPX')
@@ -107,7 +111,8 @@ class NewAnalyzer(BaseAnalyzer):
 
 ```bash
 python3 main.py analyze SPX      # 使用 DailyReturnsAnalyzer
-python3 main.py intraday SPX     # 使用 IntradayReturnsAnalyzer  
+python3 main.py intraday SPX     # 使用 IntradayReturnsAnalyzer
+python3 main.py range SPX        # 使用 DailyRangeAnalyzer
 python3 main.py compare AAPL GOOGL  # 使用 ComparisonAnalyzer
 ```
 

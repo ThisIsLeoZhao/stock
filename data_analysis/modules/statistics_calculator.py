@@ -90,6 +90,65 @@ class StatisticsCalculator:
         return gap.dropna()
     
     @staticmethod
+    def calculate_daily_range_metrics(data: pd.DataFrame) -> tuple:
+        """
+        计算日内波动范围指标
+        
+        计算从昨日收盘价到今日高点的最大涨幅，以及到今日低点的最大跌幅：
+        - 最大涨幅：(今日最高价 - 昨日收盘价) / 昨日收盘价 * 100
+        - 最大跌幅：(今日最低价 - 昨日收盘价) / 昨日收盘价 * 100
+        
+        Args:
+            data: 股票数据DataFrame，必须包含'High', 'Low', 'Close'列
+            
+        Returns:
+            (最大涨幅Series, 最大跌幅Series) 元组，单位为百分比
+        """
+        required_columns = ['High', 'Low', 'Close']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        # 获取前一日收盘价
+        prev_close = data['Close'].shift(1)
+        
+        # 计算最大涨幅：(今日最高价 - 昨日收盘价) / 昨日收盘价 * 100
+        max_gain = (data['High'] - prev_close) / prev_close * 100
+        
+        # 计算最大跌幅：(今日最低价 - 昨日收盘价) / 昨日收盘价 * 100
+        max_loss = (data['Low'] - prev_close) / prev_close * 100
+        
+        return max_gain.dropna(), max_loss.dropna()
+    
+    @staticmethod
+    def calculate_open_to_extremes_metrics(data: pd.DataFrame) -> tuple:
+        """
+        计算从今日开盘价到今日高低点的波动范围指标
+        
+        计算从今日开盘价到今日高点的涨幅，以及到今日低点的跌幅：
+        - 开盘到高点涨幅：(今日最高价 - 今日开盘价) / 今日开盘价 * 100
+        - 开盘到低点跌幅：(今日最低价 - 今日开盘价) / 今日开盘价 * 100
+        
+        Args:
+            data: 股票数据DataFrame，必须包含'High', 'Low', 'Open'列
+            
+        Returns:
+            (开盘到高点涨幅Series, 开盘到低点跌幅Series) 元组，单位为百分比
+        """
+        required_columns = ['High', 'Low', 'Open']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        # 计算从开盘到高点的涨幅：(今日最高价 - 今日开盘价) / 今日开盘价 * 100
+        open_to_high = (data['High'] - data['Open']) / data['Open'] * 100
+        
+        # 计算从开盘到低点的跌幅：(今日最低价 - 今日开盘价) / 今日开盘价 * 100
+        open_to_low = (data['Low'] - data['Open']) / data['Open'] * 100
+        
+        return open_to_high.dropna(), open_to_low.dropna()
+    
+    @staticmethod
     def calculate_basic_stats(data: pd.Series) -> Dict:
         """
         计算基础统计指标
