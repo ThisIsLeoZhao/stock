@@ -1,5 +1,8 @@
 #!/bin/bash
 echo "🚀 启动股票分析环境..."
+echo "💡 请确保使用 'source start.sh' 或 '. start.sh' 来运行此脚本"
+echo "❌ 不要使用 './start.sh' 或 'bash start.sh'，否则虚拟环境不会激活到当前shell"
+echo ""
 
 # 检查是否已经在虚拟环境中
 if [ -n "$VIRTUAL_ENV" ]; then

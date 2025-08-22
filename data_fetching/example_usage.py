@@ -7,8 +7,8 @@ This file demonstrates the improved architecture with separated concerns:
 - StockDataService: High-level interface combining both
 """
 
-from data_fetcher import StockDataService, get_stock_data
-from cache_manager import CacheManager
+from .data_fetcher import StockDataService, get_stock_data
+from .cache_manager import CacheManager
 import pandas as pd
 import time
 import yfinance as yf
@@ -20,25 +20,16 @@ def test_basic_functionality():
     
     service = StockDataService()
     
-    print("1. Fetching Apple 6 months daily data...")
+    print("1. Fetching SPX 10 years daily data...")
     try:
         start_time = time.time()
-        aapl_data = service.get_stock_data('AAPL', period='6mo', interval='1d')
+        spx_data = service.get_stock_data('^GSPC', period='10y', interval='1d')
         fetch_time = time.time() - start_time
         
-        print(f"   ✓ Success! Retrieved {len(aapl_data)} rows in {fetch_time:.2f} seconds")
-        print(f"   Date range: {aapl_data.index.min().date()} to {aapl_data.index.max().date()}")
-        print(f"   Columns: {list(aapl_data.columns)}")
-        print(f"   Sample data:\n{aapl_data.head(2)}\n")
-        
-    except Exception as e:
-        print(f"   ✗ Error: {e}\n")
-    
-    print("2. Fetching Tesla weekly data for 2 years...")
-    try:
-        tsla_data = service.get_stock_data('TSLA', period='2y', interval='1wk')
-        print(f"   ✓ Success! Retrieved {len(tsla_data)} rows")
-        print(f"   Recent weeks:\n{tsla_data.tail(2)}\n")
+        print(f"   ✓ Success! Retrieved {len(spx_data)} rows in {fetch_time:.2f} seconds")
+        print(f"   Date range: {spx_data.index.min().date()} to {spx_data.index.max().date()}")
+        print(f"   Columns: {list(spx_data.columns)}")
+        print(f"   Sample data:\n{spx_data.head(2)}\n")
         
     except Exception as e:
         print(f"   ✗ Error: {e}\n")
@@ -213,12 +204,13 @@ def main():
     print("Stock Data Service V2 - Comprehensive Testing\n")
     print("=" * 60)
     
-    ticker = yf.Ticker('AAPL')
-    data = ticker.history(period='1y', interval='1d')
-    print(data)
+    
+    # clear db
+    service = StockDataService()
+    service.clear_cache()
     
     try:
-        # test_basic_functionality()
+        test_basic_functionality()
         # test_caching_intelligence()
         # test_cache_management()
         # test_different_intervals()

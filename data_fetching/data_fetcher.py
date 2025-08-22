@@ -10,7 +10,7 @@ import pandas as pd
 import logging
 from datetime import datetime, timedelta, date
 from typing import Optional, Literal, Tuple
-from cache_manager import CacheManager
+from .cache_manager import CacheManager
 
 
 class DataFetcher:
