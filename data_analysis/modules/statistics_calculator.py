@@ -15,20 +15,79 @@ class StatisticsCalculator:
     @staticmethod
     def calculate_returns(data: pd.DataFrame, price_column: str = 'Close') -> pd.Series:
         """
-        计算收益率
-        
+        计算每日涨跌幅（收益率）
+
+        具体做法：
+        - 取出指定的价格列（如'Close'收盘价）
+        - 用pandas的pct_change()方法，计算相邻两天的百分比变化
+          即：(今日价格 - 昨日价格) / 昨日价格
+        - 结果乘以100，得到百分比形式的涨跌幅
+        - 去除首行的NaN（因为第一天没有前一天可比）
+
         Args:
             data: 股票数据DataFrame
             price_column: 价格列名
-            
+
         Returns:
-            收益率Series（百分比）
+            每日涨跌幅Series（百分比）
         """
         if price_column not in data.columns:
             raise ValueError(f"Column '{price_column}' not found in data")
         
-        returns = data[price_column].pct_change() * 100  # 转换为百分比
+        # 计算每日涨跌幅百分比
+        returns = data[price_column].pct_change() * 100
         return returns.dropna()
+    
+    @staticmethod
+    def calculate_intraday_returns(data: pd.DataFrame) -> pd.Series:
+        """
+        计算日内涨跌幅（开盘到收盘）
+
+        具体做法：
+        - 计算每天从开盘价到收盘价的涨跌幅
+        - 公式：(收盘价 - 开盘价) / 开盘价 * 100
+        - 这反映了每天交易日内的价格变化
+
+        Args:
+            data: 股票数据DataFrame，必须包含'Open'和'Close'列
+
+        Returns:
+            日内涨跌幅Series（百分比）
+        """
+        required_columns = ['Open', 'Close']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        # 计算日内涨跌幅百分比：(收盘价 - 开盘价) / 开盘价 * 100
+        intraday_returns = (data['Close'] - data['Open']) / data['Open'] * 100
+        return intraday_returns.dropna()
+    
+    @staticmethod
+    def calculate_gap_info(data: pd.DataFrame) -> pd.Series:
+        """
+        计算开盘缺口信息
+        
+        计算每天开盘价相对于前一天收盘价的缺口：
+        - 正值表示高开（gap up）
+        - 负值表示低开（gap down）
+        - 接近0表示平开
+        
+        Args:
+            data: 股票数据DataFrame，必须包含'Open'和'Close'列
+            
+        Returns:
+            开盘缺口Series（百分比）
+        """
+        required_columns = ['Open', 'Close']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        # 计算开盘缺口：(今日开盘价 - 昨日收盘价) / 昨日收盘价 * 100
+        prev_close = data['Close'].shift(1)
+        gap = (data['Open'] - prev_close) / prev_close * 100
+        return gap.dropna()
     
     @staticmethod
     def calculate_basic_stats(data: pd.Series) -> Dict:
@@ -166,3 +225,77 @@ class StatisticsCalculator:
             drawdown_periods.append(current_period)
         
         return max(drawdown_periods) if drawdown_periods else 0
+    
+    @staticmethod
+    def calculate_gap_grouped_stats(intraday_returns: pd.Series, gaps: pd.Series) -> Dict:
+        """
+        按开盘缺口类型分组计算日内收益率统计
+        
+        简单分类：
+        - 高开：开盘缺口 > 0%
+        - 低开：开盘缺口 < 0%
+        - 平开：开盘缺口 = 0%
+        
+        Args:
+            intraday_returns: 日内收益率Series
+            gaps: 开盘缺口Series
+            
+        Returns:
+            分组统计结果字典
+        """
+        # 确保两个Series的索引对齐
+        aligned_data = pd.DataFrame({
+            'intraday_returns': intraday_returns,
+            'gaps': gaps
+        }).dropna()
+        
+        if len(aligned_data) == 0:
+            return {}
+        
+        # 分类开盘类型（简单分类）
+        gap_up_mask = aligned_data['gaps'] > 0
+        gap_down_mask = aligned_data['gaps'] < 0
+        gap_flat_mask = aligned_data['gaps'] == 0
+        
+        results = {}
+        
+        # 高开统计
+        gap_up_returns = aligned_data.loc[gap_up_mask, 'intraday_returns']
+        if len(gap_up_returns) > 0:
+            results['gap_up'] = {
+                'count': len(gap_up_returns),
+                'stats': StatisticsCalculator.calculate_basic_stats(gap_up_returns),
+                'description': '高开日内表现（开盘价 > 前日收盘价）'
+            }
+        
+        # 低开统计
+        gap_down_returns = aligned_data.loc[gap_down_mask, 'intraday_returns']
+        if len(gap_down_returns) > 0:
+            results['gap_down'] = {
+                'count': len(gap_down_returns),
+                'stats': StatisticsCalculator.calculate_basic_stats(gap_down_returns),
+                'description': '低开日内表现（开盘价 < 前日收盘价）'
+            }
+        
+        # 平开统计
+        gap_flat_returns = aligned_data.loc[gap_flat_mask, 'intraday_returns']
+        if len(gap_flat_returns) > 0:
+            results['gap_flat'] = {
+                'count': len(gap_flat_returns),
+                'stats': StatisticsCalculator.calculate_basic_stats(gap_flat_returns),
+                'description': '平开日内表现（开盘价 = 前日收盘价）'
+            }
+        
+        # 添加总体统计信息
+        results['summary'] = {
+            'total_days': len(aligned_data),
+            'gap_up_days': len(gap_up_returns),
+            'gap_down_days': len(gap_down_returns),
+            'gap_flat_days': len(gap_flat_returns),
+            'gap_up_ratio': len(gap_up_returns) / len(aligned_data) if len(aligned_data) > 0 else 0,
+            'gap_down_ratio': len(gap_down_returns) / len(aligned_data) if len(aligned_data) > 0 else 0,
+            'gap_flat_ratio': len(gap_flat_returns) / len(aligned_data) if len(aligned_data) > 0 else 0,
+            'classification': '简单分类（>0 高开, <0 低开, =0 平开）'
+        }
+        
+        return results

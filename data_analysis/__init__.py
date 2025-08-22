@@ -8,7 +8,7 @@ Data Analysis Package - 数据分析模块
 - modules: 通用分析模块
 """
 
-from .analyzers.returns_analyzer import ReturnsAnalyzer
+from .analyzers.returns_analyzer_factory import ReturnsAnalyzer
 from .modules.data_provider import DataProvider
 from .modules.statistics_calculator import StatisticsCalculator
 from .modules.file_manager import FileManager
